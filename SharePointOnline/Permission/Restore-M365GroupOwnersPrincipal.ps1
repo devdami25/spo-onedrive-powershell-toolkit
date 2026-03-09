@@ -41,7 +41,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string] $SiteUrl,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [string] $ClientId,
 
