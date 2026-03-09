@@ -11,9 +11,3 @@ A collection of practical PowerShell scripts for SharePoint Online and OneDrive 
 - SharePointOnline/ – SPO-focused scripts
 - OneDrive/ – OneDrive for Business scripts
 - Utilities/ – Shared helper functions
-
-## Usage
-Each script contains built-in help:
-```powershell
-Get-Help .\ScriptName.ps1 -Detailed
-``
