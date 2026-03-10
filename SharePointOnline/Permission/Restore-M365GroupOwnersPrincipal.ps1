@@ -51,21 +51,75 @@ param(
     [string] $ClientId,
 
     [Parameter(Mandatory = $false)]
-    [switch] $AddAsSiteCollectionAdmin
+    [switch] $AddAsSiteCollectionAdmin,
+
+    [Parameter(Mandatory = $false)]
+    [int] $MaxRetries = 3,
+
+    [Parameter(Mandatory = $false)]
+    [int] $BaseRetryDelaySeconds = 2,
+
+    [Parameter(Mandatory = $false)]
+    [switch] $PassThru
 )
 
+function Invoke-WithRetry {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock] $ScriptBlock,
+        [Parameter(Mandatory = $true)][string] $OperationName,
+        [int] $maxRetries = $MaxRetries,
+        [int] $baseDelaySeconds = $BaseRetryDelaySeconds
+    )
+
+    $attempt = 0
+    while ($true) {
+        try {
+            return & $ScriptBlock
+        }
+        catch {
+            $attempt++
+            $msg = $_.Exception.Message
+            $isThrottle = ($msg -match "429" -or $msg -match "throttl" -or $msg -match "Too Many Requests" -or $msg -match "503" -or $msg -match "temporarily unavailable" -or $msg -match "timeout")
+
+            if (-not $isThrottle -or $attempt -gt $maxRetries) {
+                throw
+            }
+
+            $delay = [Math]::Min(300, ($baseDelaySeconds * [Math]::Pow(2, ($attempt - 1))))
+            Write-Warning "[$OperationName] transient failure (attempt $attempt/$maxRetries). Waiting $delay seconds then retrying... $msg"
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
+function Get-M365GroupOwnersClaim {
+    param(
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()]
+        [string] $GroupGuid
+    )
+    return "c:0o.c|federateddirectoryclaimprovider|{0}_o" -f $GroupGuid
+}
+
 try {
+    $groupGuid = $null
+    $m365GroupOwnersClaim = $null
+
     # Connect (ClientId is required in this environment)
-    Connect-PnPOnline -Url $SiteUrl -Interactive -ClientId $ClientId
+    Invoke-WithRetry -OperationName "Connect-PnPOnline" -ScriptBlock {
+        Connect-PnPOnline -Url $SiteUrl -Interactive -ClientId $ClientId
+    }
 
     # Get the M365 Group Id tied to the site
-    $site = Get-PnPSite -Includes RelatedGroupId
+    $site = Invoke-WithRetry -OperationName "Get-PnPSite" -ScriptBlock {
+        Get-PnPSite -Includes RelatedGroupId
+    }
+
     if (-not $site.RelatedGroupId -or $site.RelatedGroupId -eq [Guid]::Empty) {
         throw "This site does not appear to be Microsoft 365 Group-connected (RelatedGroupId is empty)."
     }
 
     $groupGuid = $site.RelatedGroupId.Guid.ToString()
-    $m365GroupOwnersClaim = "c:0o.c|federateddirectoryclaimprovider|{0}_o" -f $groupGuid
+    $m365GroupOwnersClaim = Get-M365GroupOwnersClaim -GroupGuid $groupGuid
 
     Write-Verbose "RelatedGroupId: $groupGuid"
     Write-Verbose "Owners claim : $m365GroupOwnersClaim"
@@ -74,30 +128,66 @@ try {
     if ($AddAsSiteCollectionAdmin) {
         if ($PSCmdlet.ShouldProcess($SiteUrl, "Add M365 Group Owners principal as Site Collection Admin")) {
             try {
-                Add-PnPSiteCollectionAdmin -Owners $m365GroupOwnersClaim | Out-Null
+                Invoke-WithRetry -OperationName "Add-PnPSiteCollectionAdmin" -ScriptBlock {
+                    Add-PnPSiteCollectionAdmin -Owners $m365GroupOwnersClaim | Out-Null
+                }
                 Write-Host "Added as Site Collection Admin: $m365GroupOwnersClaim" -ForegroundColor Green
             }
             catch {
-                Write-Warning "Could not add as Site Collection Admin (may already exist): $($_.Exception.Message)"
+                Write-Warning "Could not add as Site Collection Admin (may already exist or cannot be added): $($_.Exception.Message)"
             }
         }
     }
 
     # Add to the site's associated Owners group
-    $ownersGroup = Get-PnPGroup -AssociatedOwnerGroup
+    $ownersGroup = Invoke-WithRetry -OperationName "Get-PnPGroup-AssociatedOwnerGroup" -ScriptBlock {
+        Get-PnPGroup -AssociatedOwnerGroup
+    }
+
+    if (-not $ownersGroup) {
+        throw "Could not resolve associated Owners group for site."
+    }
 
     if ($PSCmdlet.ShouldProcess($ownersGroup.Title, "Add M365 Group Owners principal to Owners group")) {
         try {
-            Add-PnPGroupMember -Group $ownersGroup -LoginName $m365GroupOwnersClaim | Out-Null
+            Invoke-WithRetry -OperationName "Add-PnPGroupMember" -ScriptBlock {
+                Add-PnPGroupMember -Group $ownersGroup -LoginName $m365GroupOwnersClaim | Out-Null
+            }
             Write-Host "Added to Owners group '$($ownersGroup.Title)': $m365GroupOwnersClaim" -ForegroundColor Green
         }
         catch {
-            Write-Warning "Could not add to Owners group (may already exist): $($_.Exception.Message)"
+            Write-Warning "Could not add to Owners group (may already exist or cannot be added): $($_.Exception.Message)"
         }
     }
+
+    $result = [PSCustomObject]@{
+        SiteUrl = $SiteUrl
+        GroupGuid = $groupGuid
+        OwnersClaim = $m365GroupOwnersClaim
+        AddAsSiteCollectionAdmin = $AddAsSiteCollectionAdmin.IsPresent
+        OwnersGroupTitle = $ownersGroup.Title
+        Status = 'Success'
+        Timestamp = (Get-Date)
+    }
+
+    if ($PassThru) { return $result }
 }
 catch {
-    Write-Error $_.Exception.Message
+    $errorMessage = $_.Exception.Message
+    Write-Error $errorMessage
+
+    if ($PassThru) {
+        return [PSCustomObject]@{
+            SiteUrl = $SiteUrl
+            GroupGuid = $groupGuid
+            OwnersClaim = $m365GroupOwnersClaim
+            AddAsSiteCollectionAdmin = $AddAsSiteCollectionAdmin.IsPresent
+            OwnersGroupTitle = $null
+            Status = 'Failed'
+            ErrorMessage = $errorMessage
+            Timestamp = (Get-Date)
+        }
+    }
 }
 finally {
     Disconnect-PnPOnline -ErrorAction SilentlyContinue | Out-Null
