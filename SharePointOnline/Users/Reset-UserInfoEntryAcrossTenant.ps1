@@ -9,10 +9,19 @@ collection User Information List (hidden "User Information List").
 This is commonly used when troubleshooting identity resolution issues (e.g., PUID/claim mismatch symptoms)
 where a user appears in the site but behaves inconsistently.
 
+.IMPORTANT
+The account running this script must be a Site Collection Administrator on:
+- all target site collections when running tenant-wide, or
+- the specific target site when the scope is reduced (for example via -SiteFilter).
+
+Without Site Collection Administrator permissions, the script may fail to enumerate users
+or remove/re-add entries from the User Information List.
+
+
 Internally it uses:
-- Remove-PnPUser: Removes a user from the site collection User Information List. [1](https://pnp.github.io/powershell/cmdlets/Remove-PnPUser.html)
-- New-PnPUser: Adds a user to the built-in Site User Info List. [2](https://pnp.github.io/powershell/cmdlets/New-PnPUser.html)
-- Get-PnPTenantSite: Enumerates site collections; can include OneDrive sites via -IncludeOneDriveSites. [3](https://pnp.github.io/powershell/cmdlets/Get-PnPTenantSite.html)
+- Remove-PnPUser: Removes a user from the site collection User Information List.
+- New-PnPUser: Adds a user to the built-in Site User Info List.
+- Get-PnPTenantSite: Enumerates site collections; can include OneDrive sites via -IncludeOneDriveSites.
 
 .PARAMETER AdminUrl
 Your SharePoint Admin Center URL, e.g. https://contoso-admin.sharepoint.com
@@ -21,20 +30,14 @@ Your SharePoint Admin Center URL, e.g. https://contoso-admin.sharepoint.com
 One or more user identifiers (UPN/email). This script matches by Email where possible and falls back to login name match.
 
 .PARAMETER ClientId
-ClientId for interactive auth
+ClientId required for Connect-PnPOnline -Interactive in this environment.
 
 .PARAMETER IncludeOneDrive
-If set, also processes OneDrive for Business (personal) site collections. [3](https://pnp.github.io/powershell/cmdlets/Get-PnPTenantSite.html)
-
-.PARAMETER ExcludeRedirectSites
-If set (default), excludes RedirectSite#0.
-
-.PARAMETER ExcludePersonalSitesFromSPOList
-If set (default), excludes *-my.sharepoint.com/personal* from the “SharePoint sites” loop.
+If set, also processes OneDrive for Business (personal) site collections.
 
 .PARAMETER SiteFilter
 Optional. A simple filter to reduce scope (e.g. "Url -like '/sites/HR'").
-Note: This uses the -Filter parameter of Get-PnPTenantSite. [3](https://pnp.github.io/powershell/cmdlets/Get-PnPTenantSite.html)
+Note: This uses the -Filter parameter of Get-PnPTenantSite.
 
 .PARAMETER PassThru
 If set, returns objects for each site processed (recommended). Otherwise writes host messages only.
@@ -52,12 +55,12 @@ If set, returns objects for each site processed (recommended). Otherwise writes 
 .\Reset-UserInfoEntryAcrossTenant.ps1 `
   -AdminUrl "https://contoso-admin.sharepoint.com" `
   -User "user@tenant.onmicrosoft.com" `
+  -ClientId "00000000-0000-0000-0000-000000000000" `
   -WhatIf `
   -PassThru
 
 .NOTES
 Requires: PnP.PowerShell (PowerShell 7+ recommended)
-PnP PowerShell is an open-source module with community support. [5](https://learn.microsoft.com/en-us/powershell/sharepoint/sharepoint-pnp/sharepoint-pnp-cmdlets)
 Author: Dami Onabanjo
 #>
 
@@ -71,17 +74,12 @@ param(
     [ValidateNotNullOrEmpty()]
     [string[]] $User,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
     [string] $ClientId,
 
     [Parameter(Mandatory = $false)]
     [switch] $IncludeOneDrive,
-
-    [Parameter(Mandatory = $false)]
-    [switch] $ExcludeRedirectSites = $true,
-
-    [Parameter(Mandatory = $false)]
-    [switch] $ExcludePersonalSitesFromSPOList = $true,
 
     [Parameter(Mandatory = $false)]
     [string] $SiteFilter,
@@ -93,14 +91,10 @@ param(
 function Connect-PnPInteractiveSafe {
     param(
         [Parameter(Mandatory = $true)][string] $Url,
-        [Parameter(Mandatory = $false)][string] $ClientId
+        [Parameter(Mandatory = $true)][string] $ClientId
     )
 
-    if ($ClientId) {
-        Connect-PnPOnline -Url $Url -Interactive -ClientId $ClientId
-    } else {
-        Connect-PnPOnline -Url $Url -Interactive
-    }
+    Connect-PnPOnline -Url $Url -Interactive -ClientId $ClientId
 }
 
 function Reset-UserInfoEntry {
@@ -110,14 +104,14 @@ function Reset-UserInfoEntry {
     )
 
     $result = [PSCustomObject]@{
-        SiteUrl       = $SiteUrl
-        UserInput     = $UserId
-        Found         = $false
-        Removed       = $false
-        ReAdded       = $false
-        Status        = "NotStarted"
-        Error         = $null
-        TimestampUtc  = (Get-Date).ToUniversalTime().ToString("s") + "Z"
+        SiteUrl      = $SiteUrl
+        UserInput    = $UserId
+        Found        = $false
+        Removed      = $false
+        ReAdded      = $false
+        Status       = "NotStarted"
+        Error        = $null
+        TimestampUtc = (Get-Date).ToUniversalTime().ToString("s") + "Z"
     }
 
     try {
@@ -138,13 +132,11 @@ function Reset-UserInfoEntry {
         $result.Found = $true
 
         if ($PSCmdlet.ShouldProcess($SiteUrl, "Remove user '$($match.LoginName)' from User Information List")) {
-            # Removes a user from the site collection User Information List [1](https://pnp.github.io/powershell/cmdlets/Remove-PnPUser.html)
             Remove-PnPUser -Identity $match.LoginName -Force -ErrorAction Stop
             $result.Removed = $true
         }
 
         if ($PSCmdlet.ShouldProcess($SiteUrl, "Re-add user '$UserId' to User Information List")) {
-            # Adds a user to the built-in Site User Info List [2](https://pnp.github.io/powershell/cmdlets/New-PnPUser.html)
             New-PnPUser -LoginName $UserId -ErrorAction Stop | Out-Null
             $result.ReAdded = $true
         }
@@ -154,7 +146,7 @@ function Reset-UserInfoEntry {
     }
     catch {
         $result.Status = "Error"
-        $result.Error = $_.Exception.Message
+        $result.Error  = $_.Exception.Message
         return $result
     }
     finally {
@@ -168,20 +160,18 @@ function Reset-UserInfoEntry {
 Write-Verbose "Connecting to admin center: $AdminUrl"
 Connect-PnPInteractiveSafe -Url $AdminUrl -ClientId $ClientId
 
-# Get SPO sites (excluding OneDrive by default)
-# Get-PnPTenantSite returns all sites (excluding OneDrive by default) and supports -IncludeOneDriveSites and -Filter [3](https://pnp.github.io/powershell/cmdlets/Get-PnPTenantSite.html)
+# SharePoint sites (OneDrive excluded by default)
 $tenantSites = if ($SiteFilter) {
     Get-PnPTenantSite -Filter $SiteFilter -ErrorAction Stop
-} else {
+}
+else {
     Get-PnPTenantSite -ErrorAction Stop
 }
 
-if ($ExcludeRedirectSites) {
-    $tenantSites = $tenantSites | Where-Object { $_.Template -ne "RedirectSite#0" }
-}
-
-if ($ExcludePersonalSitesFromSPOList) {
-    $tenantSites = $tenantSites | Where-Object { $_.Url -notlike "*-my.sharepoint.com/personal*" }
+# Hardcoded safety exclusions
+$tenantSites = $tenantSites | Where-Object {
+    $_.Template -ne "RedirectSite#0" -and
+    $_.Url -notlike "*-my.sharepoint.com/personal*"
 }
 
 # OneDrive sites (optional)
@@ -189,10 +179,11 @@ $oneDriveSites = @()
 if ($IncludeOneDrive) {
     $oneDriveSites = if ($SiteFilter) {
         Get-PnPTenantSite -IncludeOneDriveSites -Filter $SiteFilter -ErrorAction Stop |
-            Where-Object { $_.Url -like "*-my.sharepoint.com/personal*" }
-    } else {
+            Where-Object { $_.Url -like "*-my.sharepoint.com/personal*" -and $_.Template -ne "RedirectSite#0" }
+    }
+    else {
         Get-PnPTenantSite -IncludeOneDriveSites -ErrorAction Stop |
-            Where-Object { $_.Url -like "*-my.sharepoint.com/personal*" }
+            Where-Object { $_.Url -like "*-my.sharepoint.com/personal*" -and $_.Template -ne "RedirectSite#0" }
     }
 }
 
