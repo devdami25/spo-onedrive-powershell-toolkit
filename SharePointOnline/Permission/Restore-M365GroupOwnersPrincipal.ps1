@@ -15,17 +15,22 @@ The Microsoft 365 Group claims are commonly represented as:
   - Members: c:0o.c|federateddirectoryclaimprovider|{GroupGuid}
   - Owners : c:0o.c|federateddirectoryclaimprovider|{GroupGuid}_o
 
+.PREREQUISITES
+- The account running this script must have Site Collection Administrator privileges on the target site collection.
+- PnP.PowerShell installed and available in the session.
+- A ClientId is required for interactive authentication in this environment.
+
 .PARAMETER SiteUrl
 The URL of the SharePoint Online site (must be group-connected).
 
 .PARAMETER ClientId
-ClientId to use with Connect-PnPOnline -Interactive for tenants that require it.
+ClientId to use with Connect-PnPOnline -Interactive.
 
 .PARAMETER AddAsSiteCollectionAdmin
 If specified, also adds the M365 Group Owners principal as Site Collection Admin.
 
 .EXAMPLE
-.\Restore-M365GroupOwnersPrincipal.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/ProjectX" -AddAsSiteCollectionAdmin
+.\Restore-M365GroupOwnersPrincipal.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/ProjectX" -ClientId "00000000-0000-0000-0000-000000000000" -AddAsSiteCollectionAdmin
 
 .EXAMPLE
 .\Restore-M365GroupOwnersPrincipal.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/ProjectX" -ClientId "00000000-0000-0000-0000-000000000000"
@@ -50,13 +55,8 @@ param(
 )
 
 try {
-    # Connect
-    if ($ClientId) {
-        Connect-PnPOnline -Url $SiteUrl -Interactive -ClientId $ClientId
-    }
-    else {
-        Connect-PnPOnline -Url $SiteUrl -Interactive
-    }
+    # Connect (ClientId is required in this environment)
+    Connect-PnPOnline -Url $SiteUrl -Interactive -ClientId $ClientId
 
     # Get the M365 Group Id tied to the site
     $site = Get-PnPSite -Includes RelatedGroupId
