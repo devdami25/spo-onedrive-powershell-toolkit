@@ -19,7 +19,7 @@ or remove/re-add entries from the User Information List.
 
 
 Internally it uses:
-- Remove-PnPUser: Removes a user from the site collection User Information List.
+- Remove-PnPUserInfo: Removes a user from the site collection User Information List.
 - New-PnPUser: Adds a user to the built-in Site User Info List.
 - Get-PnPTenantSite: Enumerates site collections; can include OneDrive sites via -IncludeOneDriveSites.
 
