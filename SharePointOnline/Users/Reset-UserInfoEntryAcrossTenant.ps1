@@ -42,12 +42,16 @@ Note: This uses the -Filter parameter of Get-PnPTenantSite.
 .PARAMETER PassThru
 If set, returns objects for each site processed (recommended). Otherwise writes host messages only.
 
+.PARAMETER ReAdd
+If set, re-adds the user to the User Information List after removal. Otherwise, only removes the user.
+
 .EXAMPLE
 .\Reset-UserInfoEntryAcrossTenant.ps1 `
   -AdminUrl "https://contoso-admin.sharepoint.com" `
   -User "user@tenant.onmicrosoft.com" `
   -ClientId "00000000-0000-0000-0000-000000000000" `
   -IncludeOneDrive `
+  -ReAdd `
   -PassThru | Export-Csv .\reset-results.csv -NoTypeInformation
 
 .EXAMPLE
@@ -85,7 +89,10 @@ param(
     [string] $SiteFilter,
 
     [Parameter(Mandatory = $false)]
-    [switch] $PassThru
+    [switch] $PassThru,
+
+    [Parameter(Mandatory = $false)]
+    [switch] $ReAdd
 )
 
 function Connect-PnPInteractiveSafe {
@@ -100,7 +107,8 @@ function Connect-PnPInteractiveSafe {
 function Reset-UserInfoEntry {
     param(
         [Parameter(Mandatory = $true)][string] $SiteUrl,
-        [Parameter(Mandatory = $true)][string] $UserId
+        [Parameter(Mandatory = $true)][string] $UserId,
+        [Parameter(Mandatory = $false)][switch] $ReAdd
     )
 
     $result = [PSCustomObject]@{
@@ -132,11 +140,11 @@ function Reset-UserInfoEntry {
         $result.Found = $true
 
         if ($PSCmdlet.ShouldProcess($SiteUrl, "Remove user '$($match.LoginName)' from User Information List")) {
-            Remove-PnPUser -Identity $match.LoginName -Force -ErrorAction Stop
+            Remove-PnPUserInfo -Identity $match.LoginName -ErrorAction Stop
             $result.Removed = $true
         }
 
-        if ($PSCmdlet.ShouldProcess($SiteUrl, "Re-add user '$UserId' to User Information List")) {
+        if ($ReAdd -and $PSCmdlet.ShouldProcess($SiteUrl, "Re-add user '$UserId' to User Information List")) {
             New-PnPUser -LoginName $UserId -ErrorAction Stop | Out-Null
             $result.ReAdded = $true
         }
@@ -206,7 +214,7 @@ foreach ($target in $allTargets) {
     foreach ($u in $User) {
         Write-Host "`n[$($target.Kind)] Processing site: $($target.Url) | User: $u" -ForegroundColor Cyan
 
-        $r = Reset-UserInfoEntry -SiteUrl $target.Url -UserId $u
+        $r = Reset-UserInfoEntry -SiteUrl $target.Url -UserId $u -ReAdd:$ReAdd
 
         # Add context fields
         $r | Add-Member -NotePropertyName SiteKind -NotePropertyValue $target.Kind -Force
