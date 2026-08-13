@@ -115,7 +115,7 @@ function Remove-UserFromSiteCollectionAdmin {
             }
             catch {
                 $result.Notes = "Direct remove failed: $($_.Exception.Message)"
-                Write-Verbose "Direct removal failed on $SiteUrl: $($_.Exception.Message)"
+                Write-Verbose "Direct removal failed on $SiteUrl $($_.Exception.Message)"
             }
 
             if ($RunnerLogin -and ($RunnerLogin -ne $UserToRemove)) {
