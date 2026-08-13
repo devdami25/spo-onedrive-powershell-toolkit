@@ -17,7 +17,8 @@ Client ID used with Connect-PnPOnline -Interactive.
 
 .PARAMETER ExportPath
 Optional CSV output path. If omitted, a timestamped CSV is created in the
-current folder.
+current folder. If a directory is provided, a timestamped CSV is created in
+that directory.
 
 .PARAMETER IncludeOneDrive
 Includes OneDrive for Business sites in the report.
@@ -95,6 +96,9 @@ if (-not (Get-Module -ListAvailable -Name PnP.PowerShell)) {
 if ([string]::IsNullOrWhiteSpace($ExportPath)) {
     $ExportPath = Get-DefaultExportPath
 }
+elseif (Test-Path -Path $ExportPath -PathType Container) {
+    $ExportPath = Join-Path -Path $ExportPath -ChildPath (Split-Path -Path (Get-DefaultExportPath) -Leaf)
+}
 
 Ensure-FolderExists -Path $ExportPath
 
@@ -137,7 +141,7 @@ $report = foreach ($site in $siteCollections) {
     }
 }
 
-$report | Export-Csv -Path $ExportPath -NoTypeInformation -Encoding utf8
+$report | Export-Csv -Path $ExportPath -NoTypeInformation -Encoding utf8 -ErrorAction Stop
 Write-Host "Site storage usage report generated successfully: $ExportPath" -ForegroundColor Green
 
 if ($PassThru) {
